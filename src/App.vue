@@ -71,6 +71,25 @@
             @fire="handleFire"
             @eat="handleEat"
           />
+          
+          <div v-if="!gameOver" class="expedition-wrapper">
+            <ExpeditionStatus 
+              v-if="isExpeditionActive || expedition.status === 'completed'"
+              :expedition="expedition"
+              :weatherTypes="WEATHER_TYPES"
+            />
+            <ExpeditionPrep 
+              v-else
+              :distances="EXPEDITION_DISTANCES"
+              :food="food"
+              :wood="wood"
+              :tools="tools"
+              :hide="hide"
+              :canStartExpedition="canStartExpedition"
+              :getSupplyRequirement="getExpeditionSupplyRequirement"
+              @start="handleExpeditionStart"
+            />
+          </div>
         </div>
       </div>
 
@@ -104,6 +123,8 @@ import ActionPanel from './components/ActionPanel.vue'
 import LogPanel from './components/LogPanel.vue'
 import SaveManager from './components/SaveManager.vue'
 import GameOver from './components/GameOver.vue'
+import ExpeditionPrep from './components/ExpeditionPrep.vue'
+import ExpeditionStatus from './components/ExpeditionStatus.vue'
 
 const {
   temperature,
@@ -131,7 +152,14 @@ const {
   loadGame,
   getSaveSlots,
   deleteSave,
-  restartGame
+  restartGame,
+  expedition,
+  EXPEDITION_DISTANCES,
+  WEATHER_TYPES,
+  isExpeditionActive,
+  canStartExpedition,
+  startExpedition,
+  getExpeditionSupplyRequirement
 } = useGame()
 
 const {
@@ -145,6 +173,8 @@ const {
   playEat,
   playCraft,
   playBlizzard,
+  playExpeditionStart,
+  playExpeditionComplete,
   toggleMute
 } = useAudio()
 
@@ -224,6 +254,22 @@ function handleRestart() {
 
 function showSaveManager() {
 }
+
+function handleExpeditionStart(data) {
+  const success = startExpedition(data.distanceIndex, data.supplies, data.equipment)
+  if (success) {
+    playExpeditionStart()
+  } else {
+    playWarning()
+  }
+}
+
+watch(() => expedition.value.status, (newStatus, oldStatus) => {
+  if (oldStatus === 'returning' && newStatus === 'completed') {
+    playExpeditionComplete()
+    playSuccess()
+  }
+})
 
 watch(isBlizzard, (newVal) => {
   if (newVal) {
@@ -401,6 +447,11 @@ watch(isDanger, (newVal) => {
 .right-panel {
   display: flex;
   flex-direction: column;
+  gap: 20px;
+}
+
+.expedition-wrapper {
+  width: 100%;
 }
 
 .bottom-section {

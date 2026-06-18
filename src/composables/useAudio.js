@@ -96,6 +96,22 @@ export function useAudio() {
     }
   }
 
+  function playExpeditionStart() {
+    initAudio()
+    playTone(262, 0.1, 'sine', 0.25)
+    setTimeout(() => playTone(330, 0.1, 'sine', 0.25), 100)
+    setTimeout(() => playTone(392, 0.15, 'sine', 0.25), 200)
+    setTimeout(() => playTone(523, 0.2, 'sine', 0.2), 350)
+  }
+
+  function playExpeditionComplete() {
+    initAudio()
+    playTone(523, 0.15, 'sine', 0.3)
+    setTimeout(() => playTone(659, 0.15, 'sine', 0.3), 120)
+    setTimeout(() => playTone(784, 0.15, 'sine', 0.3), 240)
+    setTimeout(() => playTone(1047, 0.3, 'sine', 0.3), 360)
+  }
+
   function toggleMute() {
     muted.value = !muted.value
   }
@@ -112,6 +128,8 @@ export function useAudio() {
     playEat,
     playCraft,
     playBlizzard,
+    playExpeditionStart,
+    playExpeditionComplete,
     toggleMute
   }
 }
