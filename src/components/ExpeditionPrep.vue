@@ -14,7 +14,7 @@
         >
           <div class="dist-name">{{ dist.name }}</div>
           <div class="dist-info">
-            <span>📅 {{ dist.days }}天往返</span>
+            <span>📅 约{{ dist.baseDays }}天</span>
             <span>⚠️ 危险: {{ Math.round(dist.danger * 100) }}%</span>
           </div>
         </button>
@@ -28,8 +28,13 @@
         <div class="supply-label">
           <span>🍖 食物</span>
           <span class="supply-requirement">
-            最低: {{ requirements.minFood }} | 推荐: {{ requirements.recommendedFood }}
+            每日消耗: {{ requirements.dailyFood }}
           </span>
+        </div>
+        <div class="supply-detail">
+          <span class="supply-min">最低: {{ requirements.minFood }}</span>
+          <span class="supply-rec">推荐: {{ requirements.recommendedFood }}</span>
+          <span class="supply-days">可支撑约 {{ foodAmount > 0 ? Math.floor(foodAmount / requirements.dailyFood) : 0 }} 天</span>
         </div>
         <div class="supply-control">
           <button class="ctrl-btn" @click="adjustSupply('food', -1)">-</button>
@@ -43,8 +48,13 @@
         <div class="supply-label">
           <span>🪵 木头</span>
           <span class="supply-requirement">
-            最低: {{ requirements.minWood }} | 推荐: {{ requirements.recommendedWood }}
+            每日消耗: {{ requirements.dailyWood }}
           </span>
+        </div>
+        <div class="supply-detail">
+          <span class="supply-min">最低: {{ requirements.minWood }}</span>
+          <span class="supply-rec">推荐: {{ requirements.recommendedWood }}</span>
+          <span class="supply-days">可支撑约 {{ woodAmount > 0 ? Math.floor(woodAmount / requirements.dailyWood) : 0 }} 天</span>
         </div>
         <div class="supply-control">
           <button class="ctrl-btn" @click="adjustSupply('wood', -1)">-</button>
@@ -87,8 +97,8 @@
       <div class="summary-title">探险预估</div>
       <div class="summary-grid">
         <div class="summary-item">
-          <span class="summary-label">往返天数</span>
-          <span class="summary-value">{{ distances[selectedDistance].days * 2 }}天</span>
+          <span class="summary-label">预计天数</span>
+          <span class="summary-value">约{{ distances[selectedDistance].baseDays }}天</span>
         </div>
         <div class="summary-item">
           <span class="summary-label">危险等级</span>
@@ -98,6 +108,9 @@
           <span class="summary-label">奖励倍率</span>
           <span class="summary-value reward-text">x{{ distances[selectedDistance].rewardMultiplier }}</span>
         </div>
+      </div>
+      <div class="summary-note">
+        <span>💡 实际天数受天气和装备影响</span>
       </div>
     </div>
 
@@ -310,7 +323,28 @@ function handleStart() {
 
 .supply-requirement {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.6);
+  color: #60a5fa;
+  font-weight: bold;
+}
+
+.supply-detail {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 11px;
+}
+
+.supply-min {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.supply-rec {
+  color: #4ade80;
+}
+
+.supply-days {
+  color: #fbbf24;
+  margin-left: auto;
 }
 
 .supply-control {
@@ -401,6 +435,15 @@ function handleStart() {
 
 .reward-text {
   color: #51cf66;
+}
+
+.summary-note {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.2);
+  text-align: center;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
 }
 
 .start-btn {

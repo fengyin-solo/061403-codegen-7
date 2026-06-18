@@ -12,7 +12,9 @@
     <div class="progress-section">
       <div class="progress-header">
         <span>探险进度</span>
-        <span>{{ daysLeft }} 天后返回</span>
+        <span class="eta-text" :class="{ etaWarning: estimatedDays > 5 }">
+          预计 {{ estimatedDays }} 天后返回
+        </span>
       </div>
       <div class="progress-bar-container">
         <div class="progress-bar">
@@ -24,6 +26,10 @@
           <span>目的地</span>
           <span>营地</span>
         </div>
+      </div>
+      <div class="progress-detail">
+        <span>已行进 {{ expedition.elapsedDays }} 天</span>
+        <span>总进度 {{ progressPercent }}%</span>
       </div>
     </div>
 
@@ -49,15 +55,28 @@
     </div>
 
     <div class="supplies-section">
-      <div class="section-title">剩余补给</div>
+      <div class="section-title">
+        <span>剩余补给</span>
+        <span class="daily-rate">每日消耗: 🍖{{ expedition.dailyFood }} 🪵{{ expedition.dailyWood }}</span>
+      </div>
       <div class="supplies-grid">
-        <div class="supply-item">
+        <div class="supply-item" :class="{ low: foodDays < 2 && foodDays > 0, empty: foodDays <= 0 }">
           <span class="supply-icon">🍖</span>
-          <span class="supply-amount">{{ expedition.supplies.food }}</span>
+          <div class="supply-info">
+            <span class="supply-amount">{{ expedition.supplies.food }}</span>
+            <span class="supply-days">
+              {{ foodDays > 0 ? `还能撑${foodDays}天` : '已耗尽' }}
+            </span>
+          </div>
         </div>
-        <div class="supply-item">
+        <div class="supply-item" :class="{ low: woodDays < 2 && woodDays > 0, empty: woodDays <= 0 }">
           <span class="supply-icon">🪵</span>
-          <span class="supply-amount">{{ expedition.supplies.wood }}</span>
+          <div class="supply-info">
+            <span class="supply-amount">{{ expedition.supplies.wood }}</span>
+            <span class="supply-days">
+              {{ woodDays > 0 ? `还能撑${woodDays}天` : '已耗尽' }}
+            </span>
+          </div>
         </div>
       </div>
     </div>
@@ -113,7 +132,8 @@ import { computed } from 'vue'
 
 const props = defineProps({
   expedition: { type: Object, required: true },
-  weatherTypes: { type: Array, required: true }
+  weatherTypes: { type: Array, required: true },
+  calcEstimatedDays: { type: Function, required: true }
 })
 
 const weatherData = computed(() => {
@@ -150,11 +170,22 @@ const statusClass = computed(() => {
 })
 
 const progressPercent = computed(() => {
-  return (props.expedition.progress / 2) * 100
+  return Math.round((props.expedition.progress / 2) * 100)
 })
 
-const daysLeft = computed(() => {
-  return props.expedition.daysRemaining
+const estimatedDays = computed(() => {
+  if (props.expedition.status === 'completed') return 0
+  return props.calcEstimatedDays(props.expedition, weatherData.value)
+})
+
+const foodDays = computed(() => {
+  if (props.expedition.dailyFood <= 0) return 99
+  return Math.floor(props.expedition.supplies.food / props.expedition.dailyFood)
+})
+
+const woodDays = computed(() => {
+  if (props.expedition.dailyWood <= 0) return 99
+  return Math.floor(props.expedition.supplies.wood / props.expedition.dailyWood)
 })
 </script>
 
@@ -248,6 +279,23 @@ const daysLeft = computed(() => {
   margin-bottom: 8px;
 }
 
+.eta-text {
+  color: #60a5fa;
+  font-weight: bold;
+}
+
+.eta-text.etaWarning {
+  color: #fbbf24;
+}
+
+.progress-detail {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
 .progress-bar-container {
   position: relative;
 }
@@ -336,6 +384,15 @@ const daysLeft = computed(() => {
   font-size: 13px;
   font-weight: bold;
   margin-bottom: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.daily-rate {
+  font-size: 10px;
+  font-weight: normal;
+  color: rgba(255, 255, 255, 0.6);
 }
 
 .supplies-section,
@@ -359,6 +416,29 @@ const daysLeft = computed(() => {
   background: rgba(0, 0, 0, 0.2);
   border-radius: 8px;
   padding: 8px 12px;
+  transition: all 0.3s ease;
+}
+
+.supply-item.low {
+  background: rgba(251, 191, 36, 0.2);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+}
+
+.supply-item.empty {
+  background: rgba(239, 68, 68, 0.2);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  animation: emptyPulse 2s ease-in-out infinite;
+}
+
+@keyframes emptyPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.supply-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .supply-icon,
@@ -371,6 +451,19 @@ const daysLeft = computed(() => {
   color: white;
   font-size: 16px;
   font-weight: bold;
+}
+
+.supply-days {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.supply-item.low .supply-days {
+  color: #fbbf24;
+}
+
+.supply-item.empty .supply-days {
+  color: #f87171;
 }
 
 .damage-section {

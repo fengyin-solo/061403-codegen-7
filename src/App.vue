@@ -77,6 +77,7 @@
               v-if="isExpeditionActive || expedition.status === 'completed'"
               :expedition="expedition"
               :weatherTypes="WEATHER_TYPES"
+              :calcEstimatedDays="calculateEstimatedDaysRemaining"
             />
             <ExpeditionPrep 
               v-else

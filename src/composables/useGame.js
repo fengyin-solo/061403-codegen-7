@@ -43,9 +43,9 @@ export function useGame() {
   })
 
   const EXPEDITION_DISTANCES = [
-    { name: '近郊探索', distance: 1, days: 1, foodCost: 2, woodCost: 1, danger: 0.1, rewardMultiplier: 1 },
-    { name: '远郊跋涉', distance: 2, days: 2, foodCost: 4, woodCost: 2, danger: 0.25, rewardMultiplier: 2 },
-    { name: '深山探险', distance: 3, days: 3, foodCost: 6, woodCost: 4, danger: 0.4, rewardMultiplier: 3.5 }
+    { name: '近郊探索', distance: 1, baseDays: 2, dailyFood: 1, dailyWood: 1, danger: 0.1, rewardMultiplier: 1, baseProgress: 1 },
+    { name: '远郊跋涉', distance: 2, baseDays: 4, dailyFood: 1, dailyWood: 1, danger: 0.25, rewardMultiplier: 2, baseProgress: 0.5 },
+    { name: '深山探险', distance: 3, baseDays: 6, dailyFood: 1, dailyWood: 2, danger: 0.4, rewardMultiplier: 3.5, baseProgress: 1 / 3 }
   ]
 
   const WEATHER_TYPES = [
@@ -385,12 +385,15 @@ export function useGame() {
     const distanceConfig = EXPEDITION_DISTANCES[distanceIndex]
     if (!distanceConfig) return false
     
+    const minFood = distanceConfig.dailyFood * 2
+    const minWood = distanceConfig.dailyWood * 2
+    
     if (food.value < supplies.food || wood.value < supplies.wood) {
       addLog('补给不足，无法出发！', 'warning')
       return false
     }
-    if (supplies.food < distanceConfig.foodCost || supplies.wood < distanceConfig.woodCost) {
-      addLog('补给不足，至少需要基础补给！', 'warning')
+    if (supplies.food < minFood || supplies.wood < minWood) {
+      addLog(`补给不足！至少需要 ${minFood} 食物和 ${minWood} 木头`, 'warning')
       return false
     }
     if (tools.value < equipment.tools || hide.value < equipment.hide) {
@@ -403,31 +406,51 @@ export function useGame() {
     tools.value -= equipment.tools
     hide.value -= equipment.hide
     
+    const initialWeather = rollExpeditionWeather(distanceConfig.distance)
+    
     expedition.value = {
       status: 'exploring',
       distance: distanceConfig.distance,
       distanceName: distanceConfig.name,
+      distanceIndex,
       progress: 0,
-      daysRemaining: distanceConfig.days * 2,
-      totalDays: distanceConfig.days * 2,
+      elapsedDays: 0,
       supplies: { ...supplies },
       equipment: { ...equipment },
-      currentWeather: 'clear',
+      currentWeather: initialWeather.type,
       loot: { food: 0, wood: 0, hide: 0, tools: 0 },
       damageTaken: 0,
-      returnDay: dayCount.value + distanceConfig.days * 2,
-      distanceIndex,
-      log: []
+      log: [],
+      dailyFood: distanceConfig.dailyFood,
+      dailyWood: distanceConfig.dailyWood,
+      baseProgressPerDay: distanceConfig.baseProgress
     }
-    
-    const weather = rollExpeditionWeather(distanceConfig.distance)
-    expedition.value.currentWeather = weather.type
     
     addLog(`🏕️ 探险队出发！目标：${distanceConfig.name}`, 'success')
     addExpeditionLog(`探险队出发，目的地：${distanceConfig.name}`, 'info')
-    addExpeditionLog(`当前天气：${weather.name}`, weather.type === 'blizzard' ? 'danger' : 'info')
+    addExpeditionLog(`携带补给：🍖${supplies.food} 🪵${supplies.wood} 🔧${equipment.tools} 🦊${equipment.hide}`, 'info')
+    addExpeditionLog(`每日消耗：🍖${distanceConfig.dailyFood} 🪵${distanceConfig.dailyWood}`, 'info')
+    addExpeditionLog(`初始天气：${initialWeather.name}`, initialWeather.type === 'blizzard' ? 'danger' : 'info')
     
     return true
+  }
+
+  function calculateDailyProgress(exp, weather) {
+    const toolBonus = exp.equipment.tools * 0.15
+    const speedMultiplier = weather.speedMod * (1 + toolBonus * 0.3)
+    return exp.baseProgressPerDay * speedMultiplier
+  }
+
+  function calculateEstimatedDaysRemaining(exp, weather) {
+    const dailyProgress = calculateDailyProgress(exp, weather)
+    let remainingProgress
+    if (exp.status === 'exploring') {
+      remainingProgress = 2 - exp.progress
+    } else {
+      remainingProgress = 2 - exp.progress
+    }
+    if (dailyProgress <= 0) return 999
+    return Math.ceil(remainingProgress / dailyProgress)
   }
 
   function processExpeditionDay() {
@@ -440,40 +463,52 @@ export function useGame() {
     const toolBonus = exp.equipment.tools * 0.15
     const hideProtection = exp.equipment.hide * 0.1
     
-    const dailyFoodConsume = Math.ceil(distanceConfig.foodCost / distanceConfig.days / 2)
-    const dailyWoodConsume = Math.ceil(distanceConfig.woodCost / distanceConfig.days / 2)
+    const dailyFoodConsume = exp.dailyFood
+    const dailyWoodConsume = exp.dailyWood
+    
+    const daySummary = {
+      foodConsumed: 0,
+      woodConsumed: 0,
+      hungerDamage: 0,
+      tempDamage: 0,
+      eventDamage: 0,
+      loot: { food: 0, wood: 0, hide: 0, tools: 0 },
+      progressGain: 0,
+      weatherChanged: false,
+      newWeather: null,
+      reachedDestination: false,
+      returned: false
+    }
     
     if (exp.supplies.food >= dailyFoodConsume) {
       exp.supplies.food -= dailyFoodConsume
+      daySummary.foodConsumed = dailyFoodConsume
     } else {
+      daySummary.foodConsumed = exp.supplies.food
       exp.supplies.food = 0
-      const hungerDamage = 5
-      exp.damageTaken += hungerDamage
-      temperature.value = Math.max(0, temperature.value - hungerDamage)
-      addExpeditionLog('⚠️ 食物耗尽，饥饿导致体温下降！', 'danger')
+      daySummary.hungerDamage = 5
     }
     
     let heatFromFire = 0
     if (exp.supplies.wood >= dailyWoodConsume) {
       exp.supplies.wood -= dailyWoodConsume
+      daySummary.woodConsumed = dailyWoodConsume
       heatFromFire = 8
     } else {
+      daySummary.woodConsumed = exp.supplies.wood
       exp.supplies.wood = 0
-      addExpeditionLog('🪵 木柴耗尽，无法生火取暖', 'warning')
     }
     
     const baseTempDamage = Math.abs(weather.tempMod) * 0.3
-    const tempDamage = Math.max(0, baseTempDamage * (1 - hideProtection) - heatFromFire * 0.5)
-    
-    if (tempDamage > 0) {
-      exp.damageTaken += tempDamage
-      temperature.value = Math.max(0, temperature.value - tempDamage)
-    }
+    const tempDamage = Math.max(0, Math.round((baseTempDamage * (1 - hideProtection) - heatFromFire * 0.5) * 10) / 10)
+    daySummary.tempDamage = tempDamage
     
     const isReturning = exp.status === 'returning'
-    const progressGain = (weather.speedMod * (1 + toolBonus * 0.3)) / distanceConfig.days
+    const progressGain = calculateDailyProgress(exp, weather)
+    daySummary.progressGain = progressGain
     
     if (!isReturning) {
+      const oldProgress = exp.progress
       exp.progress = Math.min(1, exp.progress + progressGain)
       
       const baseLoot = 1 + Math.random() * 2
@@ -482,74 +517,142 @@ export function useGame() {
       const lootRoll = Math.random()
       if (lootRoll < 0.4) {
         exp.loot.food += lootAmount
-        addExpeditionLog(`🍖 发现食物 +${lootAmount}`, 'success')
+        daySummary.loot.food = lootAmount
       } else if (lootRoll < 0.7) {
         exp.loot.wood += lootAmount
-        addExpeditionLog(`🪵 收集木材 +${lootAmount}`, 'success')
+        daySummary.loot.wood = lootAmount
       } else if (lootRoll < 0.9) {
-        exp.loot.hide += Math.ceil(lootAmount * 0.5)
-        addExpeditionLog(`🦊 发现兽皮 +${Math.ceil(lootAmount * 0.5)}`, 'success')
+        const hideLoot = Math.ceil(lootAmount * 0.5)
+        exp.loot.hide += hideLoot
+        daySummary.loot.hide = hideLoot
       } else if (lootRoll < 0.95 && exp.equipment.tools > 0) {
         exp.loot.tools += 1
-        addExpeditionLog(`🔧 发现可用工具 +1`, 'success')
-      } else {
-        addExpeditionLog('今天没有特别的发现', 'info')
+        daySummary.loot.tools = 1
       }
       
       if (Math.random() < distanceConfig.danger) {
         const eventDamage = 5 + Math.floor(Math.random() * 10)
         const reducedDamage = Math.ceil(eventDamage * (1 - hideProtection))
-        exp.damageTaken += reducedDamage
-        temperature.value = Math.max(0, temperature.value - reducedDamage)
-        addExpeditionLog(`⚠️ 遭遇意外，受到 ${reducedDamage} 点伤害！`, 'danger')
+        daySummary.eventDamage = reducedDamage
       }
       
-      if (exp.progress >= 1) {
+      if (oldProgress < 1 && exp.progress >= 1) {
         exp.status = 'returning'
-        addExpeditionLog('📍 到达目的地，开始返程', 'success')
-        addLog(`🏔️ 探险队到达${distanceConfig.name}，开始返程`, 'info')
+        daySummary.reachedDestination = true
       }
     } else {
       exp.progress = Math.min(2, exp.progress + progressGain)
       
       if (exp.progress >= 2) {
-        completeExpedition()
-        return
+        daySummary.returned = true
       }
+    }
+    
+    const totalDamage = daySummary.hungerDamage + daySummary.tempDamage + daySummary.eventDamage
+    if (totalDamage > 0) {
+      exp.damageTaken += totalDamage
+      temperature.value = Math.max(0, temperature.value - totalDamage)
     }
     
     const newWeather = rollExpeditionWeather(distanceConfig.distance)
     if (newWeather.type !== exp.currentWeather) {
       exp.currentWeather = newWeather.type
-      addExpeditionLog(`天气变化：${newWeather.name}`, newWeather.type === 'blizzard' ? 'danger' : 'info')
+      daySummary.weatherChanged = true
+      daySummary.newWeather = newWeather
     }
     
-    exp.daysRemaining--
+    exp.elapsedDays++
+    
+    logExpeditionDaySummary(exp, daySummary, weather)
+    
+    if (daySummary.returned) {
+      completeExpedition()
+      return
+    }
     
     checkGameOver()
   }
 
+  function logExpeditionDaySummary(exp, summary, weather) {
+    const dayNum = exp.elapsedDays
+    
+    addExpeditionLog(`--- 第 ${dayNum} 天 (${weather.name}) ---`, 'info')
+    
+    if (summary.foodConsumed > 0) {
+      addExpeditionLog(`🍖 消耗食物 ${summary.foodConsumed}，剩余 ${exp.supplies.food}`, 'info')
+    }
+    if (summary.hungerDamage > 0) {
+      addExpeditionLog(`⚠️ 食物耗尽！饥饿伤害 -${summary.hungerDamage}`, 'danger')
+    }
+    
+    if (summary.woodConsumed > 0) {
+      addExpeditionLog(`🪵 消耗木柴 ${summary.woodConsumed}，剩余 ${exp.supplies.wood}`, 'info')
+    }
+    if (summary.woodConsumed === 0 && exp.dailyWood > 0 && exp.supplies.wood === 0) {
+      addExpeditionLog(`🪵 木柴耗尽，无法生火取暖`, 'warning')
+    }
+    
+    if (summary.tempDamage > 0) {
+      addExpeditionLog(`❄️ 低温伤害 -${summary.tempDamage}`, 'warning')
+    }
+    
+    if (summary.eventDamage > 0) {
+      addExpeditionLog(`💥 遭遇意外！伤害 -${summary.eventDamage}`, 'danger')
+    }
+    
+    if (summary.loot.food > 0) {
+      addExpeditionLog(`🍖 发现食物 +${summary.loot.food}`, 'success')
+    }
+    if (summary.loot.wood > 0) {
+      addExpeditionLog(`🪵 收集木材 +${summary.loot.wood}`, 'success')
+    }
+    if (summary.loot.hide > 0) {
+      addExpeditionLog(`🦊 发现兽皮 +${summary.loot.hide}`, 'success')
+    }
+    if (summary.loot.tools > 0) {
+      addExpeditionLog(`🔧 发现工具 +${summary.loot.tools}`, 'success')
+    }
+    
+    if (summary.reachedDestination) {
+      addExpeditionLog(`📍 到达目的地！开始返程`, 'success')
+      addLog(`🏔️ 探险队到达${exp.distanceName}，开始返程`, 'info')
+    }
+    
+    if (summary.weatherChanged && summary.newWeather) {
+      addExpeditionLog(`🌤️ 天气变为：${summary.newWeather.name}`, summary.newWeather.type === 'blizzard' ? 'danger' : 'info')
+    }
+    
+    const progressPercent = Math.round((exp.progress / 2) * 100)
+    const statusText = exp.status === 'exploring' ? '前往中' : '返程中'
+    addExpeditionLog(`进度：${progressPercent}% (${statusText})`, 'info')
+  }
+
   function completeExpedition() {
     const exp = expedition.value
-    const distanceConfig = EXPEDITION_DISTANCES[exp.distanceIndex]
     
-    food.value += exp.loot.food
-    wood.value += exp.loot.wood
-    hide.value += exp.loot.hide
-    tools.value += exp.equipment.tools + exp.loot.tools
-    hide.value += exp.equipment.hide
+    food.value += exp.loot.food + exp.supplies.food
+    wood.value += exp.loot.wood + exp.supplies.wood
+    hide.value += exp.loot.hide + exp.equipment.hide
+    tools.value += exp.loot.tools + exp.equipment.tools
     
     expedition.value.status = 'completed'
     
     addLog(`🎉 探险队安全归来！`, 'success')
+    addExpeditionLog(`🎉 安全返回营地！`, 'success')
+    
     addLog(`收获：🍖${exp.loot.food} 🪵${exp.loot.wood} 🦊${exp.loot.hide} 🔧${exp.loot.tools}`, 'success')
+    addLog(`归还装备：🔧${exp.equipment.tools} 🦊${exp.equipment.hide}`, 'info')
+    if (exp.supplies.food > 0 || exp.supplies.wood > 0) {
+      addLog(`剩余补给：🍖${exp.supplies.food} 🪵${exp.supplies.wood}`, 'info')
+    }
     if (exp.damageTaken > 0) {
       addLog(`探险中总计承受 ${Math.round(exp.damageTaken)} 点伤害`, 'warning')
     }
+    addLog(`探险历时 ${exp.elapsedDays} 天`, 'info')
     
     setTimeout(() => {
       resetExpedition()
-    }, 3000)
+    }, 5000)
   }
 
   function resetExpedition() {
@@ -559,26 +662,32 @@ export function useGame() {
       distanceName: '',
       distanceIndex: 0,
       progress: 0,
-      daysRemaining: 0,
-      totalDays: 0,
+      elapsedDays: 0,
       supplies: { food: 0, wood: 0 },
       equipment: { tools: 0, hide: 0 },
       currentWeather: 'clear',
       loot: { food: 0, wood: 0, hide: 0, tools: 0 },
       damageTaken: 0,
-      returnDay: 0,
-      log: []
+      log: [],
+      dailyFood: 0,
+      dailyWood: 0,
+      baseProgressPerDay: 0
     }
   }
 
   function getExpeditionSupplyRequirement(distanceIndex) {
     const config = EXPEDITION_DISTANCES[distanceIndex]
     if (!config) return null
+    const minFood = config.dailyFood * 2
+    const minWood = config.dailyWood * 2
     return {
-      minFood: config.foodCost,
-      minWood: config.woodCost,
-      recommendedFood: config.foodCost * 1.5,
-      recommendedWood: config.woodCost * 1.5
+      minFood,
+      minWood,
+      recommendedFood: Math.ceil(config.dailyFood * config.baseDays * 1.2),
+      recommendedWood: Math.ceil(config.dailyWood * config.baseDays * 1.2),
+      dailyFood: config.dailyFood,
+      dailyWood: config.dailyWood,
+      baseDays: config.baseDays
     }
   }
 
@@ -646,6 +755,8 @@ export function useGame() {
     isExpeditionActive,
     canStartExpedition,
     startExpedition,
-    getExpeditionSupplyRequirement
+    getExpeditionSupplyRequirement,
+    calculateDailyProgress,
+    calculateEstimatedDaysRemaining
   }
 }
